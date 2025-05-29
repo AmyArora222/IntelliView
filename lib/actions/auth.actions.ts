@@ -1,6 +1,8 @@
 'use server';
 
 import { auth, db } from "@/firebase/admin";
+import { CollectionReference, DocumentData, Query } from "firebase-admin/firestore";
+import { documentId } from "firebase/firestore";
 import { cookies } from "next/headers";
 
 // Session duration (1 week)
@@ -121,3 +123,5 @@ export async function isAuthenticated() {
   const user = await getCurrentUser();
   return !!user;
 }
+
+
