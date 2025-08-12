@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
-import { generator, interviewer } from "@/constants";
+import { interviewer } from "@/constants";
 import { createFeedback } from "@/lib/actions/general.action";
-
+import type { AssistantOverrides } from "@vapi-ai/web/dist/api";
 
 enum CallStatus {
   INACTIVE = "INACTIVE",
@@ -26,6 +26,7 @@ const Agent = ({
   userName,
   userId,
   interviewId,
+  feedbackId,
   type,
   questions,
 }: AgentProps) => {
@@ -33,7 +34,7 @@ const Agent = ({
   const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
   const [messages, setMessages] = useState<SavedMessage[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  // const [lastMessage, setLastMessage] = useState<string>("");
+  const [lastMessage, setLastMessage] = useState<string>("");
 
   useEffect(() => {
     const onCallStart = () => {
@@ -82,14 +83,19 @@ const Agent = ({
     };
   }, []);
 
+  useEffect(() => {
+    if (messages.length > 0) {
+      setLastMessage(messages[messages.length - 1].content);
+    }
 
-  const handleGenerateFeedback = async (messages: SavedMessage[]) => {
-      console.log("Generate Feddback here");
+    const handleGenerateFeedback = async (messages: SavedMessage[]) => {
+      console.log("handleGenerateFeedback");
 
       const { success, feedbackId: id } = await createFeedback({
         interviewId: interviewId!,
         userId: userId!,
         transcript: messages,
+        feedbackId,
       });
 
       if (success && id) {
@@ -100,60 +106,65 @@ const Agent = ({
       }
     };
 
-  useEffect(() => {
-    if (callStatus === CallStatus.FINISHED){
-      if (type === "generate"){
-        router.push("/")
-      }else{
-        handleGenerateFeedback(messages);
-      }
+    if (callStatus === CallStatus.FINISHED) {
+      handleGenerateFeedback(messages);
+      // if (type === "generate") {
+      //   router.push("/");
+      // } else {
+      //   handleGenerateFeedback(messages);
+      // }
     }
-  }, [messages, callStatus, type, userId]);
+  }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
   
   const handleCall = async () => {
-    setCallStatus(CallStatus.CONNECTING);
+  setCallStatus(CallStatus.CONNECTING);
 
-    if (type === "generate") {
-      await vapi.start(
-        undefined,
-        {
-          variableValues: {
-            username: userName,
-            userid: userId,
-          },
-          clientMessages: ["transcript"],
-          serverMessages: [],
+  const baseOverrides: AssistantOverrides = {
+    clientMessages: [],
+    serverMessages: [],
+    variableValues: {}, // we'll fill this in per case
+  };
+
+  if (type === "generate") {
+    await vapi.start(
+      undefined, // assistant
+      {
+        ...baseOverrides,
+        variableValues: {
+          username: userName,
+          userid: userId,
         },
-        undefined,
-        generator
-      );
-    } else {
-      let formattedQuestions = "";
-      if (questions) {
-        formattedQuestions = questions
-          .map((question) => `- ${question}`)
-          .join("\n");
-      }
+      },
+      undefined, // squad
+      process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID! // workflow
+    );
+  } else {
+    let formattedQuestions = "";
+    if (questions) {
+      formattedQuestions = questions
+        .map((question) => `- ${question}`)
+        .join("\n");
+    }
 
-      await vapi.start(interviewer, {
+    await vapi.start(
+      interviewer, // assistant
+      {
+        ...baseOverrides,
         variableValues: {
           questions: formattedQuestions,
         },
-        clientMessages: ["transcript"],
-        serverMessages: [],
-      });
-    }
-  };
+      }
+    );
+  }
+};
+
 
 
   const handleDisconnect = () => {
     setCallStatus(CallStatus.FINISHED);
     vapi.stop();
   };
-
-  const latestMessage = messages[messages.length - 1]?.content;
-  const isCallInactiveOrFinished = callStatus === CallStatus.INACTIVE || callStatus === CallStatus.FINISHED;
 
   return (
     <>
@@ -192,13 +203,13 @@ const Agent = ({
         <div className="transcript-border">
           <div className="transcript">
             <p
-              key={latestMessage}
+              key={lastMessage}
               className={cn(
                 "transition-opacity duration-500 opacity-0",
                 "animate-fadeIn opacity-100"
               )}
             >
-              {latestMessage}
+              {lastMessage}
             </p>
           </div>
         </div>
@@ -215,7 +226,9 @@ const Agent = ({
             />
 
             <span className="relative">
-              {isCallInactiveOrFinished ? 'Call' : '. . .'}
+              {callStatus === "INACTIVE" || callStatus === "FINISHED"
+                ? "Call"
+                : ". . ."}
             </span>
           </button>
         ) : (
